@@ -29,6 +29,10 @@ contract PuppyRaffle is ERC721, Ownable {
     address public feeAddress;
     uint64 public totalFees = 0;
 
+    /*//////////////////////////////////////////////////////////////
+                                MAPPINGS
+    //////////////////////////////////////////////////////////////*/
+
     // mappings to keep track of token traits
     mapping(uint256 => uint256) public tokenIdToRarity;
     mapping(uint256 => string) public rarityToUri;
@@ -48,6 +52,11 @@ contract PuppyRaffle is ERC721, Ownable {
     string private legendaryImageUri = "ipfs://QmYx6GsYAKnNzZ9A6NvEKV9nf1VaDzJrqDR23Y8YSkebLU";
     uint256 public constant LEGENDARY_RARITY = 5;
     string private constant LEGENDARY = "legendary";
+
+    /*//////////////////////////////////////////////////////////////
+                                EVENTS
+    //////////////////////////////////////////////////////////////*/
+
 
     // Events
     event RaffleEnter(address[] newPlayers);
@@ -76,6 +85,7 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @notice they have to pay the entrance fee * the number of players
     /// @notice duplicate entrants are not allowed
     /// @param newPlayers the list of players to enter the raffle
+    // @audit entranceFee param is not in the function signature
     function enterRaffle(address[] memory newPlayers) public payable {
         require(msg.value == entranceFee * newPlayers.length, "PuppyRaffle: Must send enough to enter raffle");
         for (uint256 i = 0; i < newPlayers.length; i++) {
@@ -83,6 +93,7 @@ contract PuppyRaffle is ERC721, Ownable {
         }
 
         // Check for duplicates
+        // q shouldn't we check duplicates first before pushing the array?
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
@@ -107,6 +118,7 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @notice a way to get the index in the array
     /// @param player the address of a player in the raffle
     /// @return the index of the player in the array, if they are not active, it returns 0
+    // q why is this external fuction? 
     function getActivePlayerIndex(address player) external view returns (uint256) {
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == player) {
@@ -133,6 +145,8 @@ contract PuppyRaffle is ERC721, Ownable {
         uint256 fee = (totalAmountCollected * 20) / 100;
         totalFees = totalFees + uint64(fee);
 
+
+        // q what is this totalSupply function?
         uint256 tokenId = totalSupply();
 
         // We use a different RNG calculate from the winnerIndex to determine rarity
@@ -145,6 +159,7 @@ contract PuppyRaffle is ERC721, Ownable {
             tokenIdToRarity[tokenId] = LEGENDARY_RARITY;
         }
 
+        // q shouldn't we delete players after we select the winner?
         delete players;
         raffleStartTime = block.timestamp;
         previousWinner = winner;
@@ -186,6 +201,7 @@ contract PuppyRaffle is ERC721, Ownable {
 
     /// @notice this function will return the URI for the token
     /// @param tokenId the Id of the NFT
+    // q where is this function being called?
     function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
         require(_exists(tokenId), "PuppyRaffle: URI query for nonexistent token");
 
