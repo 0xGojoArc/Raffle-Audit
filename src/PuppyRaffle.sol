@@ -21,6 +21,7 @@ contract PuppyRaffle is ERC721, Ownable {
     uint256 public immutable entranceFee;
 
     address[] public players;
+
     uint256 public raffleDuration;
     uint256 public raffleStartTime;
     address public previousWinner;
@@ -68,6 +69,7 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @param _raffleDuration the duration in seconds of the raffle
     constructor(uint256 _entranceFee, address _feeAddress, uint256 _raffleDuration) ERC721("Puppy Raffle", "PR") {
         entranceFee = _entranceFee;
+        // input validation
         feeAddress = _feeAddress;
         raffleDuration = _raffleDuration;
         raffleStartTime = block.timestamp;
@@ -94,21 +96,26 @@ contract PuppyRaffle is ERC721, Ownable {
 
         // Check for duplicates
         // q shouldn't we check duplicates first before pushing the array?
+        // @audit denial of service attack
+        // @note players.length will be read from storage, so use a variable instead to reduce gas cost
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
             }
         }
+        // @note if its an empty array are we still going to emit? 
         emit RaffleEnter(newPlayers);
     }
 
     /// @param playerIndex the index of the player to refund. You can find it externally by calling `getActivePlayerIndex`
     /// @dev This function will allow there to be blank spots in the array
     function refund(uint256 playerIndex) public {
+        // @audit MEV
         address playerAddress = players[playerIndex];
         require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
         require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
 
+        //@audit Reentrancy
         payable(msg.sender).sendValue(entranceFee);
 
         players[playerIndex] = address(0);
@@ -126,6 +133,8 @@ contract PuppyRaffle is ERC721, Ownable {
             }
         }
         return 0;
+        // q what if player is at index 0?
+        // @audit if player is at index 0, this function returns 0, a player might think they are not active
     }
 
     /// @notice this function will select a winner and mint a puppy
@@ -135,21 +144,32 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @dev we reset the active players array after the winner is selected
     /// @dev we send 80% of the funds to the winner, the other 20% goes to the feeAddress
     function selectWinner() external {
+
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
+
+        // @audit randomness
+        // fixes: ChainLink VRF, Commit Reveal Scheme
         uint256 winnerIndex =
             uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
         address winner = players[winnerIndex];
+        // q why not just do address(this).balance?
         uint256 totalAmountCollected = players.length * entranceFee;
+        // q is 80% correct?
+        // q there may be arithmetic error here?
         uint256 prizePool = (totalAmountCollected * 80) / 100;
         uint256 fee = (totalAmountCollected * 20) / 100;
+        // e total fees the owner should be able to collect
+        // @audit overflow
+        // @audit unsafe cast of uint256 to uint64
         totalFees = totalFees + uint64(fee);
 
-
-        // q what is this totalSupply function?
+        // e when new NFT is minted, totalSupply is used as token ID
+        // q where do we increment the tokenId/totalSupply?
         uint256 tokenId = totalSupply();
 
         // We use a different RNG calculate from the winnerIndex to determine rarity
+        // @audit randomness
         uint256 rarity = uint256(keccak256(abi.encodePacked(msg.sender, block.difficulty))) % 100;
         if (rarity <= COMMON_RARITY) {
             tokenIdToRarity[tokenId] = COMMON_RARITY;
@@ -161,8 +181,11 @@ contract PuppyRaffle is ERC721, Ownable {
 
         // q shouldn't we delete players after we select the winner?
         delete players;
-        raffleStartTime = block.timestamp;
-        previousWinner = winner;
+        raffleStartTime = block.timestamp; // resetting the raffle start time
+        previousWinner = winner; // e vanity, doesn't matter much
+
+        // @follow-up what is winner is smart contract with a fallback?
+        // @audit the winner wouldnt get the money is fallback was messed up
         (bool success,) = winner.call{value: prizePool}("");
         require(success, "PuppyRaffle: Failed to send prize pool to winner");
         _safeMint(winner, tokenId);
@@ -170,9 +193,14 @@ contract PuppyRaffle is ERC721, Ownable {
 
     /// @notice this function will withdraw the fees to the feeAddress
     function withdrawFees() external {
+        // @follow-up if protocol has players someone cant withdraw fees?
+        // @audit is it difficult to withdraw fees?
+        // @note if there are unexpected ETH transfers to the contract, which would cause the condition to fail and prevent withdrawals.
+        // @audit mishandling ETH
         require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
         uint256 feesToWithdraw = totalFees;
         totalFees = 0;
+        // slither-disable-next-line arbitrary-send-eth
         (bool success,) = feeAddress.call{value: feesToWithdraw}("");
         require(success, "PuppyRaffle: Failed to withdraw fees");
     }
@@ -181,10 +209,12 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @param newFeeAddress the new address to send fees to
     function changeFeeAddress(address newFeeAddress) external onlyOwner {
         feeAddress = newFeeAddress;
+        // @note are we missing events?
         emit FeeAddressChanged(newFeeAddress);
     }
 
     /// @notice this function will return true if the msg.sender is an active player
+    // @audit seems like we are not using this function anywhere.
     function _isActivePlayer() internal view returns (bool) {
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == msg.sender) {
